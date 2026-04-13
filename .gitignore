@@ -47,3 +47,14 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+.positai
+
+# macOS
+.DS_Store
+
+# Word temporary files
+~$*
+
+# Project output and manuscript (not tracked in git)
+output/
+manuscript/

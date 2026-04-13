@@ -1,8 +1,8 @@
 # Packages
-library(tidyverse)
 library(ggtext)
 library(patchwork)
 library(mgcv)
+library(tidyverse)
 
 # Common theme (same as figure_2.R)
 common_theme <- theme(
@@ -94,7 +94,7 @@ ocat_predictions <- function(df, n_levels) {
   # 95% CI via posterior simulation (unconditional = accounts for smoothing
   # parameter uncertainty in addition to coefficient uncertainty)
   set.seed(123)
-  B    <- 1000
+  B    <- 10000
   sims <- rmvn(B, coef(m), vcov(m, unconditional = TRUE))
 
   ev_sims <- vapply(seq_len(B), function(b) {
@@ -246,3 +246,65 @@ ggsave(
   units = "cm",
   dpi = 600
 )
+
+# =============================================================================
+# Post-burn recovery summaries
+# =============================================================================
+
+# Ordinal thresholds (integer positions in factor level order):
+#   Resprouting  = 2  (any recovery after burn)
+#   Vegetative   = 3  (vegetative or above)
+#   Flowering    = 5  (reproductive or above)
+
+burn_dates <- c(spring = as.Date("2023-11-08"), summer = as.Date("2024-01-16"))
+
+# Total individuals enrolled per species x treatment (denominator)
+n_total <- data %>%
+  filter(treatment != "baseline") %>%
+  distinct(species, treatment, code) %>%
+  count(species, treatment, name = "n_total")
+
+# Maximum state reached by each individual AFTER their burn date
+recovery_summary <- data %>%
+  filter(treatment != "baseline") %>%
+  mutate(burn_date = burn_dates[treatment]) %>%
+  filter(date > burn_date) %>%
+  group_by(species, treatment, code) %>%
+  summarise(max_state = max(as.integer(state)), .groups = "drop") %>%
+  # Right-join to include individuals with no post-burn observations (max_state = NA)
+  right_join(
+    data %>%
+      filter(treatment != "baseline") %>%
+      distinct(species, treatment, code),
+    by = c("species", "treatment", "code")
+  ) %>%
+  replace_na(list(max_state = 0L)) %>%
+  group_by(species, treatment) %>%
+  summarise(
+    n_resprouted   = sum(max_state >= 2),   # Resprouting or above
+    n_vegetative   = sum(max_state >= 3),   # Vegetative or above
+    n_reproductive = sum(max_state >= 5),   # Flowering or above
+    .groups = "drop"
+  ) %>%
+  left_join(n_total, by = c("species", "treatment")) %>%
+  mutate(
+    prop_resprouted   = round(n_resprouted   / n_total, 2),
+    prop_vegetative   = round(n_vegetative   / n_total, 2),
+    prop_reproductive = round(n_reproductive / n_total, 2),
+    treatment         = str_to_title(treatment),
+    species           = str_remove_all(species, "\\*")
+  ) %>%
+  select(
+    Species                  = species,
+    Treatment                = treatment,
+    `N total`                = n_total,
+    `N resprouted`           = n_resprouted,
+    `Prop. resprouted`       = prop_resprouted,
+    `N vegetative+`          = n_vegetative,
+    `Prop. vegetative+`      = prop_vegetative,
+    `N reproductive+`        = n_reproductive,
+    `Prop. reproductive+`    = prop_reproductive
+  ) %>%
+  arrange(Species, Treatment)
+
+write.csv(recovery_summary, "output/recovery_summary.csv", row.names = FALSE)
